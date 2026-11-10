@@ -1,7 +1,7 @@
 /*
 Written by Grace Brown, Oct 2026
 For use with the Parallax Feedback 360° High-Speed Servo
-and an 8-trial cricket dispenser. Read the Parallax servo guide for more details (linked in Github)
+and an 8-trial cricket dispenser. Read the Parallax servo guide for more details (linked in protocols.io)
 
 Reads pulse-width modulation (PWM) feedback to calculate angular
 position. Each target is calculated from the initial home angle.
@@ -14,22 +14,21 @@ at which the stop was commanded.
 Code works in a series of steps:
 1. Measures the initial position and save it as the home angle.
 2. Waits for a z or Z command through Serial Monitor at 9600 baud.
-3. Checks for valid feedback. If unavailable, cancel the command without counting a trial.
-4. Calculates the next target from home and set the TTL output HIGH.
-5. Measures feedback pulses, calculate duty cycle, and convert it to theta, between 0 and 359 degrees.
+3. Checks for valid feedback. If unavailable, cancels the command without counting a trial.
+4. Calculates the next target from home and sets the TTL output HIGH.
+5. Measures feedback pulses, calculates duty cycle, and converts it to theta, between 0 and 359 degrees.
 6. Compares theta with the previous reading to detect zero crossings.
 Increases or decreases turns and calculate the continuous position.
-7. Compares position with the target and adjust the motor command.
+7. Compares position with the target and adjusts the motor command.
 Repeats until within 3 degrees or the movement times out.
-8. Sends the stop pulse, set TTL LOW, and settle for 100 milliseconds.
-9. Reads the settled position and report the trial result.
+8. Sends the stop pulse, sets TTL LOW, and settles for 100 milliseconds.
+9. Reads the settled position and reports the trial result.
 Discards commands received during movement or settling.
 10. Increase the trial counter, including timed-out movements.
-Wait for another z command if fewer than eight trials have
-been attempted. After eight attempts, reset Arduino to restart.
+Waits for another z command if fewer than eight trials have
+been attempted. After eight attempts, resets Arduino to restart.
 
-Sends a digital high/low TTL through A0 to connected
-recording equipment.
+Sends a digital high/low TTL through A0.
 */
 
 #include <Servo.h>
@@ -41,16 +40,16 @@ const int FEEDBACK_PIN = 2; // yellow feedback wire
 const int TTL_PIN = A0; // timing output to recording equipment
 
 // defines the stop pulse and response to angular error
-const int SERVO_CENTER = 1513; // replace with the calibrated stop value
-const float KP = 1.5; // proportional gain used in this implementation, increased from Parralax guide due to motor moving too slowly under load.
+const int STOP_PULSE= 1513; // replace with the calibrated stop value
+const float KP = 1.5; // proportional gain used for this dispenser
 const int CONTROL_OFFSET = 30; // adds an adjustment outside the stop region, value borrowed from Parralx guide.
 const int MAX_OUTPUT = 200; // limits the proportional adjustment, value borrowed from Parralax guide.
 const int SERVO_MIN = 1280; // lowest allowed control pulse, in microseconds
 const int SERVO_MAX = 1720; // highest allowed control pulse, in microseconds
 
-// converts feedback duty cycle into degrees; see the Parallax servo guide for more deets
-const int DC_MIN = 29; // minimum duty cycle in thousandths: 2.9%, borrowed from Parallax guide
-const int DC_MAX = 971; // maximum duty cycle in thousandths: 97.1%, borrowed from Parallax guide
+// converts feedback duty cycle into degrees; see the Parallax servo guide for more details
+const int DC_MIN = 29; // minimum duty cycle in thousandths, borrowed from Parallax guide
+const int DC_MAX = 971; // maximum duty cycle in thousandths, borrowed from Parallax guide
 const int UNITS_FC = 360; // angular units in one full circle
 
 // defines the target spacing and movement limits
@@ -77,7 +76,7 @@ void setup() {
   pinMode(FEEDBACK_PIN, INPUT);
 
   // prepares the stop pulse before starting output through pin 9
-  myServo.writeMicroseconds(SERVO_CENTER);
+  myServo.writeMicroseconds(STOP_PULSE);
   myServo.attach(SERVO_PIN);
   delay(500); // allows 500 milliseconds for the servo to settle
 
@@ -108,10 +107,10 @@ void loop() {
 
   char command = Serial.read();
 
-  if (command != 'z' && command != 'Z') return;//Z or z in serial monitor triggers a trial 
+  if (command != 'z' && command != 'Z') return;//ignores all key press commands except for Z or z
 
   if (!updatePosition()) {
-    myServo.writeMicroseconds(SERVO_CENTER);
+    myServo.writeMicroseconds(STOP_PULSE);
     Serial.println("WARNING: no valid feedback; command cancelled.");
 
     while (Serial.available() > 0) {
@@ -158,7 +157,7 @@ void loop() {
   // prints endpoint and error only if the final feedback reading suceeded
   if (endpoint_valid) {
     long end_angle = servo_angle;//updates the end angle to be the servo angle
-    long final_error = target_angle - end_angle;//shows discrepancy between intended angle and target angle
+    long final_error = target_angle - end_angle;//target angle minus the measured endpoint, in degrees
 
     Serial.print(end_angle);
     Serial.print(",");
@@ -204,7 +203,7 @@ bool moveToAngle(long target_angle) {
 
     // stops while feedback is unavailable, then retries
     if (!updatePosition()) {
-      myServo.writeMicroseconds(SERVO_CENTER);
+      myServo.writeMicroseconds(STOP_PULSE);
       delay(CONTROL_INTERVAL);
       continue;
     }
@@ -213,7 +212,7 @@ bool moveToAngle(long target_angle) {
 
     // stops and reports success when measured error enters the allowed range
     if (abs(error_angle) <= ANGLE_TOLERANCE) {
-      myServo.writeMicroseconds(SERVO_CENTER);// "motor: stop!"
+      myServo.writeMicroseconds(STOP_PULSE);// "motor: stop!"
       return true;//ends moveToAngle function, returns success = true
     }
 
@@ -231,15 +230,15 @@ bool moveToAngle(long target_angle) {
     }
 
     // builds the final pulse and keeps it within the allowed limits
-    int servo_command = SERVO_CENTER + output + offset;
-    servo_command = constrain(servo_command, SERVO_MIN, SERVO_MAX);
+    int servo_command = STOP_PULSE+ output + offset;
+    servo_command = constrain(servo_command, SERVO_MIN, SERVO_MAX);// keeps final pulse between 1280 and 1720 microsecs
 
     myServo.writeMicroseconds(servo_command);
     delay(CONTROL_INTERVAL);
   }
 
   // stops and reports failure when the movement times out
-  myServo.writeMicroseconds(SERVO_CENTER);
+  myServo.writeMicroseconds(STOP_PULSE);
   return false;
 }
 //next block checks to see if feedback wire's emitted signal is usable prior to calculating an angle
@@ -251,8 +250,8 @@ bool updatePosition() {//true if position is updated, false if feedback signal f
 
   // starts at attempt 0, add 1 attempt each attempt up to 20
   for (int attempt = 0; attempt < 20; attempt++) {
-    t_high = pulseIn(FEEDBACK_PIN, HIGH, 3000);// appends the feedback pin to record a high pulse, 3000 microsec timeout
-    t_low = pulseIn(FEEDBACK_PIN, LOW, 3000);// appends feedback pin to record a low pusle, 3000 microecs timeout
+    t_high = pulseIn(FEEDBACK_PIN, HIGH, 3000);// measures the HIGH pulse duration in microseconds; 3000 microsecond timeout
+    t_low = pulseIn(FEEDBACK_PIN, LOW, 3000);// measures the LOW pulse duration in microseconds; 3000 microsecond timeout
 
     // if either t_high or t_low zero, continue to next attempt, up to 20
     if (t_high == 0 || t_low == 0) continue;
@@ -291,15 +290,15 @@ bool updatePosition() {//true if position is updated, false if feedback signal f
   // counts crossings between the high and low ends of the angle range
   if (theta < 90 && theta_previous > 270) {
     turns++;
-  }// previous reading was a high angle value, a subsequent low reading does not mean the motor moved nearly 360 degrees. turn would be +1
+  }// adds 1 to the turn count
   else if (theta_previous < 90 && theta > 270) {
     turns--;
-  }//previous reading was low angle value, subsequent high reading does not mean motor moved nearly 360 degrees. turn would be -1
+  }//subtracts 1 from the turn count
 
   // combines full rotations and the current angle
   // this is mathematically equivalent to the original positive/negative branches
   servo_angle = turns * UNITS_FC + theta;//for example, servo_angle= -1 * 360 + 358 = -2 degrees
-  theta_previous = theta;// updates the step
+  theta_previous = theta;// saves this angle for comparison with the next reading
 
   return true;
 }
