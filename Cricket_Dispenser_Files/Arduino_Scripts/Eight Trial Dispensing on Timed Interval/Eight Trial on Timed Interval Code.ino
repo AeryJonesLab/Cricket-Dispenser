@@ -19,9 +19,9 @@ Code works in a series of steps:
 2. Calculate the duty cycle. 
 3. Convert duty cycle to theta, between 0 and 359 degs. 
 4. Compare theta to previous theta so Arduino detects a zero crossing. 
-5. Update turns ++ and calculate the continuous position. 
+5. Update turn count when the measured position crosses zero and calculate the continuous position. 
 6. Compare updated position with target angle. Repeat readings until within 
-angle tolerance. 
+3 degree angle tolerance. 
 7. Send a STOP_PULSE, settle for 20 microsecs, record trial success/failure. 
 8. Increase trial counter until TRIAL_MAX is reached.
 
@@ -38,7 +38,7 @@ const int FEEDBACK_PIN = 2; // yellow feedback wire
 const int TTL_PIN = A0; // timing output to recording equipment
 
 // defines the stop pulse and response to angular error
-const int SERVO_CENTER = 1513; // replace with the calibrated stop value
+const int STOP_PULSE = 1513; // replace with the calibrated stop value
 const float KP = 1.5; // proportional gain used in this implementation, increased from Parralax guide due to motor moving too slowly under load.
 const int CONTROL_OFFSET = 30; // adds an adjustment outside the stop region, value borrowed from Parralx guide. 
 const int MAX_OUTPUT = 200; // limits the proportional adjustment, value borrowed from Parralax guide. 
@@ -64,7 +64,7 @@ const unsigned long ITI = 60000UL; // 1 minute, in milliseconds
 // tracks angle within a rotation and crossings through zero
 long servo_angle = 0; // initial placeholder; updated from feedback
 int theta_previous = 0; // previous angle used to detect crossings through zero
-long turns = 0; // full-rotation count, which can be positive or negative
+long turns = 0; // counts crossings through zero in either direction
 bool first_feedback = true; // true until the first valid reading is received
 long home_angle = 0; // stores the initial measured angle as a fixed reference
 
@@ -76,7 +76,7 @@ void setup() {
   pinMode(FEEDBACK_PIN, INPUT);
 
   // prepares the stop pulse before starting output through pin 9
-  myServo.writeMicroseconds(SERVO_CENTER);
+  myServo.writeMicroseconds(STOP_PULSE);
   myServo.attach(SERVO_PIN);
   delay(500); // allows 500 milliseconds for the servo to settle
 
@@ -137,8 +137,8 @@ void loop() {
 
   // prints endpoint and error only if the final feedback reading suceeded
   if (endpoint_valid) {
-    long end_angle = servo_angle;//updates the end angle to be the servo angle 
-    long final_error = target_angle - end_angle;//shows discrepancy between intended angle and target angle
+    long end_angle = servo_angle;//saves the measured position after the motor settles 
+    long final_error = target_angle - end_angle;//target angle minus the end angle, in degrees 
 
     Serial.print(end_angle);
     Serial.print(",");
@@ -182,7 +182,7 @@ bool moveToAngle(long target_angle) {
 
     // stops while feedback is unavailable, then retries
     if (!updatePosition()) {
-      myServo.writeMicroseconds(SERVO_CENTER);
+      myServo.writeMicroseconds(STOP_PULSE);
       delay(CONTROL_INTERVAL);
       continue;
     }
@@ -191,7 +191,7 @@ bool moveToAngle(long target_angle) {
 
     // stops and reports success when measured error enters the allowed range
     if (abs(error_angle) <= ANGLE_TOLERANCE) {
-      myServo.writeMicroseconds(SERVO_CENTER);// "motor: stop!"
+      myServo.writeMicroseconds(STOP_PULSE);// "motor: stop!"
       return true;//ends moveToAngle function, returns success = true  
     }
 
@@ -209,7 +209,7 @@ bool moveToAngle(long target_angle) {
     }
 
     // builds the final pulse and keeps it within the allowed limits
-    int servo_command = SERVO_CENTER + output + offset;
+    int servo_command = STOP_PULSE + output + offset;
     servo_command = constrain(servo_command, SERVO_MIN, SERVO_MAX);
 
     myServo.writeMicroseconds(servo_command);
@@ -217,20 +217,20 @@ bool moveToAngle(long target_angle) {
   }
 
   // stops and reports failure when the movement times out
-  myServo.writeMicroseconds(SERVO_CENTER);
+  myServo.writeMicroseconds(STOP_PULSE);
   return false;
 }
 //next block checks to see if feedback wire's emitted signal is usable prior to calculating an angle
 bool updatePosition() {//true if position is updated, false if feedback signal fails 
-  unsigned long t_high;// stores length of time t_high as a long int
-  unsigned long t_low;//stroes length of time t_low as a long int
+  unsigned long t_high;// stores the HIGH pulse duration in microseconds 
+  unsigned long t_low;//stroes LOW pulse duration in microseconds 
   unsigned long t_cycle;//stores combined high and low duration
   bool valid_cycle = false;//begin as false because no reading has passed check 
 
   // starts at attempt 0, add 1 attempt each attempt up to 20
   for (int attempt = 0; attempt < 20; attempt++) {
-    t_high = pulseIn(FEEDBACK_PIN, HIGH, 3000);// appends the feedback pin to record a high pulse, 3000 microsec timeout
-    t_low = pulseIn(FEEDBACK_PIN, LOW, 3000);// appends feedback pin to record a low pusle, 3000 microecs timeout 
+    t_high = pulseIn(FEEDBACK_PIN, HIGH, 3000);// measures the feedback pin to record a high pulse, 3000 microsec timeout
+    t_low = pulseIn(FEEDBACK_PIN, LOW, 3000);// measures feedback pin to record a low pusle, 3000 microecs timeout 
 
     // if either t_high or t_low zero, continue to next attempt, up to 20
     if (t_high == 0 || t_low == 0) continue;
@@ -269,10 +269,10 @@ bool updatePosition() {//true if position is updated, false if feedback signal f
   // counts crossings between the high and low ends of the angle range
   if (theta < 90 && theta_previous > 270) {
     turns++;
-  }// previous reading was a high angle value, a subsequent low reading does not mean the motor moved nearly 360 degrees. turn would be +1 
+  }// previous reading was a high angle value, a subsequent low reading does not mean the motor moved nearly 360 degrees. turn would be +1 from current turn count 
   else if (theta_previous < 90 && theta > 270) {
     turns--;
-  }//previous reading was low angle value, subsequent high reading does not mean motor moved nearly 360 degrees. turn would be -1
+  }//previous reading was low angle value, subsequent high reading does not mean motor moved nearly 360 degrees. turn would be -1 from current turn count
 
   // combines full rotations and the current angle
   // this is mathematically equivalent to the original positive/negative branches
