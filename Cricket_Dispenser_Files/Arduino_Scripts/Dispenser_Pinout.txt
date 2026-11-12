@@ -1,5 +1,5 @@
-D2  - Servo control (white wire)
-D9  - Servo feedback (yellow wire)
+D2  - Servo feedback (yellow wire)
+D9  - Servo control (white wire)
 VIN - Servo power (red wire)
 GND - Servo ground (black wire)
 A0  - Movement TTL output
