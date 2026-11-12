@@ -1,5 +1,6 @@
 Automated Live-Insect Dispenser for Studying Prey-Capture Behavior in Rodents 
 
+[![DOI](https://zenodo.org/badge/1291336108.svg)](https://doi.org/10.5281/zenodo.24174430)
 
 
 Build and script files for an automated, 3D-printed dispenser designed to release individual live crickets during rodent prey-capture experiments. The dispenser was developed to reduce experimenter intervention during prey delivery and is controlled through an Arduino. 3D-printed parts are provided as STEP files, a complete Fusion build, and a complete PreForm print assembly. Arduino scripts are provided for calibrating the motor and operating the dispenser in manual trigger and timed trigger modes.
